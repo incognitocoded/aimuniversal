@@ -1,0 +1,179 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "LostHubIntro"
+ScreenGui.ResetOnSpawn = false
+
+if gethui then
+    ScreenGui.Parent = gethui()
+elseif syn and syn.protect_gui then
+    syn.protect_gui(ScreenGui)
+    ScreenGui.Parent = CoreGui
+else
+    ScreenGui.Parent = CoreGui
+end
+
+local IntroFrame = Instance.new("Frame")
+IntroFrame.Size = UDim2.new(1, 0, 1, 0)
+IntroFrame.BackgroundTransparency = 1
+IntroFrame.Parent = ScreenGui
+
+local lettersText = {"l", "o", "s", "t", "h", "u", "b"}
+local letterLabels = {}
+local totalLetters = #lettersText
+
+for i, char in ipairs(lettersText) do
+    local label = Instance.new("TextLabel")
+    label.Text = char
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 45
+    label.TextColor3 = Color3.fromRGB(255, 50, 50)
+    label.Size = UDim2.new(0, 40, 0, 40)
+    label.BackgroundTransparency = 1
+    
+    local randomX = math.random(10, 80) / 100
+    local randomY = math.random(10, 80) / 100
+    label.Position = UDim2.new(randomX, 0, randomY, 0)
+    label.Parent = IntroFrame
+    
+    table.insert(letterLabels, label)
+end
+
+for _, label in ipairs(letterLabels) do
+    task.spawn(function()
+        for i = 1, 6 do
+            local targetX = math.clamp(label.Position.X.Scale + math.random(-15, 15)/100, 0.05, 0.9)
+            local targetY = math.clamp(label.Position.Y.Scale + math.random(-15, 15)/100, 0.05, 0.9)
+            local tween = TweenService:Create(label, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Position = UDim2.new(targetX, 0, targetY, 0)
+            })
+            tween:Play()
+            tween.Completed:Wait()
+        end
+    end)
+end
+
+task.wait(1.5)
+
+for i, label in ipairs(letterLabels) do
+    local targetPos = UDim2.new(0.5, -((totalLetters - (i - 1) * 2 - 1) * 18), 0.5, -20)
+    local assembleTween = TweenService:Create(label, TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Position = targetPos,
+        TextColor3 = Color3.fromRGB(255, 255, 255)
+    })
+    assembleTween:Play()
+end
+
+task.wait(1.2)
+
+for _, label in ipairs(letterLabels) do
+    TweenService:Create(label, TweenInfo.new(0.4), {TextTransparency = 1}):Play()
+end
+
+task.wait(0.5)
+ScreenGui:Destroy()
+
+local Settings = {
+    FOVDiameter = 300,
+    FOVColor = Color3.fromRGB(255, 0, 0),
+    AimPart = "HumanoidRootPart",
+    Smoothness = 0.2,
+    MaxDistance = 5000,
+    TeamCheck = true
+}
+
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.NumSides = 60
+FOVCircle.Radius = Settings.FOVDiameter / 2
+FOVCircle.Color = Settings.FOVColor
+FOVCircle.Filled = false
+FOVCircle.Visible = true
+
+local isAiming = false
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isAiming = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isAiming = false
+    end
+end)
+
+local function IsVisible(targetPart)
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("Head") then return false end
+    
+    local ignoreList = {LocalPlayer.Character, targetPart.Parent}
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.FilterDescendantsInstances = ignoreList
+    raycastParams.IgnoreWater = true
+
+    local origin = Camera.CFrame.Position
+    local direction = (targetPart.Position - origin)
+    local result = Workspace:Raycast(origin, direction, raycastParams)
+
+    return result == nil
+end
+
+local function GetClosestTarget()
+    local closestPlayer = nil
+    local shortestDistance = Settings.FOVDiameter / 2
+    local mousePos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            if not Settings.TeamCheck or player.Team ~= LocalPlayer.Team then
+                if player.Character and player.Character:FindFirstChild(Settings.AimPart) then
+                    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+                    if humanoid and humanoid.Health > 0 then
+                        local bodyPart = player.Character[Settings.AimPart]
+                        local distanceToPlayer = (bodyPart.Position - Camera.CFrame.Position).Magnitude
+                        
+                        if distanceToPlayer <= Settings.MaxDistance then
+                            local screenPos, onScreen = Camera:WorldToViewportPoint(bodyPart.Position)
+
+                            if onScreen then
+                                local targetPos2D = Vector2.new(screenPos.X, screenPos.Y)
+                                local distance = (targetPos2D - mousePos).Magnitude
+
+                                if distance < shortestDistance then
+                                    if IsVisible(bodyPart) then
+                                        shortestDistance = distance
+                                        closestPlayer = bodyPart
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+RunService.RenderStepped:Connect(function()
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    FOVCircle.Radius = Settings.FOVDiameter / 2
+
+    if isAiming then
+        local target = GetClosestTarget()
+        if target then
+            local targetCFrame = CFrame.new(Camera.CFrame.Position, target.Position)
+            Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, Settings.Smoothness)
+        end
+    end
+end)
